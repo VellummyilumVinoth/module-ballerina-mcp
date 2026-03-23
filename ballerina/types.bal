@@ -19,9 +19,10 @@ import ballerina/http;
 # Refers to any valid JSON-RPC object that can be decoded off the wire, or encoded to be sent.
 public type JsonRpcMessage JsonRpcRequest|JsonRpcNotification|JsonRpcError|JsonRpcResponse;
 
-public const LATEST_PROTOCOL_VERSION = "2025-03-26";
+public const LATEST_PROTOCOL_VERSION = "2025-06-18";
 public const SUPPORTED_PROTOCOL_VERSIONS = [
     LATEST_PROTOCOL_VERSION,
+    "2025-03-26",
     "2024-11-05",
     "2024-10-07"
 ];
@@ -210,8 +211,10 @@ public type ClientCapabilities record {
         # Whether the client supports notifications for changes to the roots list.
         boolean listChanged?;
     } roots?;
-    # Present if the client supports sampling from an LLM. 
+    # Present if the client supports sampling from an LLM.
     record {} sampling?;
+    # Present if the client supports elicitation requests from the server.
+    record {} elicitation?;
 };
 
 # Capabilities that a server may support. Known capabilities are defined here, in this schema,
@@ -248,6 +251,8 @@ public type Implementation record {
     string name;
     # The version of the implementation
     string version;
+    # A human-readable title for the implementation, intended for display to end users.
+    string title?;
 };
 
 # Represents a paginated request with optional cursor-based pagination.
@@ -270,6 +275,8 @@ public type ResourceContents record {
     string uri;
     # The MIME type of this resource, if known.
     string mimeType?;
+    # Optional metadata attached to this resource content.
+    record {} _meta?;
 };
 
 # Text resource contents
@@ -297,6 +304,8 @@ public type EmbeddedResource record {
     TextResourceContents|BlobResourceContents 'resource;
     # Optional annotations for the client
     Annotations annotations?;
+    # Optional metadata attached to this embedded resource.
+    record {} _meta?;
 };
 
 # Sent from the client to request a list of tools the server has.
@@ -316,7 +325,9 @@ public type ListToolsResult record {
 # The server's response to a tool call.
 public type CallToolResult record {
     # The content of the tool call result
-    (TextContent|ImageContent|AudioContent|EmbeddedResource)[] content;
+    ContentBlock[] content;
+    # Structured data output from the tool, conforming to the tool's outputSchema if defined.
+    record {} structuredContent?;
     # Whether the tool call ended in an error.
     # If not set, this is assumed to be false (the call was successful).
     boolean isError?;
@@ -367,9 +378,11 @@ public type ToolAnnotations record {
 
 # Definition for a tool the client can call.
 public type ToolDefinition record {
-    # The name of the tool
+    # The name of the tool.
     string name;
-    # A human-readable description of the tool
+    # A human-readable title for the tool, intended for display to end users.
+    string title?;
+    # A human-readable description of the tool.
     # This can be used by clients to improve the LLM's understanding of available tools.
     string description?;
     # A JSON Schema object defining the expected parameters for the tool.
@@ -378,8 +391,17 @@ public type ToolDefinition record {
         record {|record {}...;|} properties?;
         string[] required?;
     } inputSchema;
+    # An optional JSON Schema defining the structure of the tool's output returned in structuredContent.
+    # If defined, clients can use this to understand and validate the tool output.
+    record {
+        "object" 'type;
+        record {|record {}...;|} properties?;
+        string[] required?;
+    } outputSchema?;
     # Optional additional tool information.
     ToolAnnotations annotations?;
+    # Optional metadata attached to this tool definition.
+    record {} _meta?;
 };
 
 # Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
@@ -391,6 +413,8 @@ public type Annotations record {|
     # A value of 1 means "most important," and indicates that the data is effectively required,
     # while 0 means "least important," and indicates that the data is entirely optional.
     decimal priority?;
+    # The ISO 8601 formatted datetime when this item was last modified.
+    string lastModified?;
 |};
 
 # Text provided to or from an LLM.
@@ -401,6 +425,8 @@ public type TextContent record {
     string text;
     # Optional annotations for the client
     Annotations annotations?;
+    # Optional metadata attached to this content.
+    record {} _meta?;
 };
 
 # An image provided to or from an LLM.
@@ -413,6 +439,8 @@ public type ImageContent record {
     string mimeType;
     # Optional annotations for the client
     Annotations annotations?;
+    # Optional metadata attached to this content.
+    record {} _meta?;
 };
 
 # Audio provided to or from an LLM.
@@ -425,6 +453,120 @@ public type AudioContent record {
     string mimeType;
     # Optional annotations for the client
     Annotations annotations?;
+    # Optional metadata attached to this content.
+    record {} _meta?;
+};
+
+# A link to a resource that can be fetched via the MCP protocol, usable as content in messages and tool results.
+public type ResourceLink record {
+    # The type discriminator for resource links
+    "resource_link" 'type;
+    # The URI of the resource
+    string uri;
+    # The name of the resource. Used for programmatic/logical identification.
+    string name;
+    # A human-readable title for the resource link, intended for display to end users.
+    string title?;
+    # A description of what this resource contains
+    string description?;
+    # The MIME type of the resource, if known
+    string mimeType?;
+    # Optional annotations for the client
+    Annotations annotations?;
+    # Optional metadata attached to this resource link.
+    record {} _meta?;
+};
+
+# Represents any content block that can appear in messages or tool results.
+# This union includes text, image, audio, resource links, and embedded resources.
+public type ContentBlock TextContent|ImageContent|AudioContent|ResourceLink|EmbeddedResource;
+
+# Primitive schema types used in elicitation requests to define the shape of requested user input.
+public type StringSchema record {
+    # The type discriminator
+    "string" 'type;
+    # A human-readable title for the field
+    string title?;
+    # A description of what the field represents
+    string description?;
+    # Minimum string length
+    int minLength?;
+    # Maximum string length
+    int maxLength?;
+    # Optional format hint for the string value
+    "email"|"uri"|"date"|"date-time" format?;
+};
+
+# Schema for numeric values in elicitation requests.
+public type NumberSchema record {
+    # The type discriminator ("number" or "integer")
+    "number"|"integer" 'type;
+    # A human-readable title for the field
+    string title?;
+    # A description of what the field represents
+    string description?;
+    # Minimum numeric value (inclusive)
+    decimal minimum?;
+    # Maximum numeric value (inclusive)
+    decimal maximum?;
+};
+
+# Schema for boolean values in elicitation requests.
+public type BooleanSchema record {
+    # The type discriminator
+    "boolean" 'type;
+    # A human-readable title for the field
+    string title?;
+    # A description of what the field represents
+    string description?;
+    # Default value for the boolean field
+    boolean 'default?;
+};
+
+# Schema for string fields restricted to a fixed set of values (enum) in elicitation requests.
+public type EnumSchema record {
+    # The type discriminator (always "string" for enum schemas)
+    "string" 'type;
+    # The allowed string values
+    string[] 'enum;
+    # A human-readable title for the field
+    string title?;
+    # A description of what the field represents
+    string description?;
+    # Optional human-readable display names corresponding to each enum value
+    string[] enumNames?;
+};
+
+# A primitive schema definition used in elicitation request parameter schemas.
+public type PrimitiveSchemaDefinition StringSchema|NumberSchema|BooleanSchema|EnumSchema;
+
+# Sent from the server to the client to request additional information from the user.
+# This is a server-initiated request that the client presents to the user.
+public type ElicitRequest record {|
+    *Request;
+    # The method identifier for elicitation requests
+    "elicitation/create" method = "elicitation/create";
+    # Parameters for the elicitation request
+    record {
+        *RequestParams;
+        # The message to present to the user explaining what information is needed.
+        string message;
+        # The schema defining the structure and types of the requested information.
+        record {
+            "object" 'type;
+            map<PrimitiveSchemaDefinition> properties;
+            string[] required?;
+        } requestedSchema;
+    } params;
+|};
+
+# The client's response to an elicitation request from the server.
+public type ElicitResult record {
+    *Result;
+    # The action taken by the user: "accept" (submitted data), "decline" (rejected), or "cancel" (dismissed).
+    "accept"|"decline"|"cancel" action;
+    # The user-provided content, only present when action is "accept".
+    map<string|decimal|boolean> content?;
 };
 
 # Represents a result sent from the server to the client.
