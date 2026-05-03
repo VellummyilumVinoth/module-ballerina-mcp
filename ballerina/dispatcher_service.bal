@@ -136,8 +136,8 @@ isolated function getDispatcherService(http:HttpServiceConfig httpServiceConfig)
 
         private isolated function handleInitializeRequest(JsonRpcRequest jsonRpcRequest, http:Headers headers)
             returns http:BadRequest|http:Ok|Error {
-            JsonRpcRequest {jsonrpc: _, id, ...request} = jsonRpcRequest;
-            InitializeRequest|error initRequest = request.cloneWithType();
+            RequestId? id = jsonRpcRequest.id;
+            InitializeRequest|error initRequest = jsonRpcRequest.cloneWithType();
             if initRequest is error {
                 return <http:BadRequest>{
                     body: createJsonRpcError(INVALID_REQUEST,
@@ -151,7 +151,7 @@ isolated function getDispatcherService(http:HttpServiceConfig httpServiceConfig)
             string requestedVersion = initRequest.params.protocolVersion;
             string protocolVersion = self.selectProtocolVersion(requestedVersion);
 
-            InitializeResult initResult = {
+            InitializeResult & readonly initResult = {
                 protocolVersion: protocolVersion,
                 capabilities: (serviceConfig.options?.capabilities ?: {
                     tools: {}
@@ -189,7 +189,7 @@ isolated function getDispatcherService(http:HttpServiceConfig httpServiceConfig)
                     body: {
                         jsonrpc: JSONRPC_VERSION,
                         id: id,
-                        result: initResult.clone()
+                        result: initResult
                     }
                 };
             }
